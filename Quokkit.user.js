@@ -135,6 +135,11 @@
             console.log("lazy init item IDs");
             listItemIDs();
         }
+        //console.log(event.target.type);
+        if(event.target.type){
+            // don't do keyboard navigation when we're typing a comment
+            return;
+        }
         const key = String.fromCharCode(event.keyCode);
         switch (key) {
             case 'j':
