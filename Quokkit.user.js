@@ -176,6 +176,6 @@
         console.log("Quokkit loaded");
     }
 
-    document.addEventListener("load", initQuokkit());
     document.addEventListener("keypress", keyEventDispatcher);
+    initQuokkit();
 })();
