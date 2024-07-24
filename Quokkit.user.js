@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Quokkit
 // @namespace    http://tampermonkey.net/
-// @version      1.0.0
+// @version      1.0.1
 // @description  QOL features for The Motte
 // @author       John Doe Fletcher
 // @match        https://themotte.org/
@@ -14,25 +14,94 @@
 
 (function() {
     'use strict';
-    GM_addStyle('.selected { border: 1px dashed red }');
-    let itemType = document.URL.search("\/post\/") >= 0 ? "comment" : "post"; // comment threads live under .../post/:postId
+
+    // Globals
+    let itemType;
     let itemList;
-    let cursorIndex = -1;
+    let cursorIndex;
+    let t_cursor;
+
+    const Constants = {
+        selected: "qk_selected",
+        postSelector: '[id^="post-"]:not([id^="post-text-"])',
+        commentSelector: '[id^="comment-"][id$="-only"]',
+        css: {
+            upvoted: ".active.arrow-up::before",
+            downvoted: ".active.arrow-down::before"
+        }
+    };
 
     const Direction = {
         DOWN: "Down",
         UP: "Up"
+    };
+
+    const qk_utils = {
+        throttle (callback, limit) {
+            // https://stackoverflow.com/a/27078401
+            var waiting = false;
+            return function () {
+                if (!waiting) {
+                    callback.apply(this, arguments);
+                    waiting = true;
+                    setTimeout(function () {
+                        waiting = false;
+                    }, limit);
+                }
+            }
+        },
+        isElementInViewport (el) {
+            // https://stackoverflow.com/a/7557433
+            var rect = el.getBoundingClientRect();
+            return (
+                rect.top >= 0 &&
+                rect.left >= 0 &&
+                rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) && /* or $(window).height() */
+                rect.right <= (window.innerWidth || document.documentElement.clientWidth) /* or $(window).width() */
+            );
+        },
+        isStyleDefined: (function() {
+            // Cache CSS selectors with rules defined at page load and return a closure that checks if a given selector is in the cache
+            let rules = Array.from(document.styleSheets) // enumerate stylesheets
+            .slice(2) // chop out the root style and the main stylesheet so we're only looking at custom themes and user-defined css
+            .flatMap(sheet => Array.from(sheet.cssRules)
+                     .flatMap(rule => rule.selectorText)); // stick em all in one flat list of strings
+
+            return (selector) => rules.findIndex(st => st == selector) >= 0;
+        })(),
+        registerStyles() {
+            // Register custom styles
+            GM_addStyle(`.${Constants.selected} { border: 1px dashed red }`);
+            if(!qk_utils.isStyleDefined(Constants.css.upvoted)) {
+                GM_addStyle(`.${Constants.css.upvoted} { color: #bd2130 }`);
+            }
+
+            if(!qk_utils.isStyleDefined(Constants.css.downvoted)) {
+                GM_addStyle(`.${Constants.css.downvoted} { color: #0062cc }`);
+            }
+        },
+        findParentBySelector(element, selector) {
+            // probably broken
+            let cur = element.parentNode;
+            while(cur && !cur.matches(selector)) {
+                cur = cur.parentNode;
+            }
+            return cur;
+        }
+    };
+
+    function selectItem(element) {
+        if(!element) {
+            return;
+        }
+        element.classList.add(Constants.selected);
     }
 
-    function isElementInViewport (el) {
-        // https://stackoverflow.com/a/7557433
-        var rect = el.getBoundingClientRect();
-        return (
-            rect.top >= 0 &&
-            rect.left >= 0 &&
-            rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) && /* or $(window).height() */
-            rect.right <= (window.innerWidth || document.documentElement.clientWidth) /* or $(window).width() */
-        );
+    function deselectItem(element) {
+        if(!element) {
+            return;
+        }
+        element.classList.remove(Constants.selected);
     }
 
     function vote(direction) {
@@ -59,6 +128,14 @@
         }
     }
 
+    function reply() {
+        if(itemType != "comment" || typeof openReplyBox !== "function") {
+            return;
+        }
+        let commentId = (itemList[cursorIndex].replace("comment-", "").replace("-only", "") || "");
+        openReplyBox(`reply-to-${commentId}`);
+    }
+
     function frontPage() {
         window.open("https://themotte.org", "_self");
     }
@@ -78,7 +155,8 @@
 
     function cursor(direction) {
         if(cursorIndex >= 0) {
-            document.getElementById(itemList[cursorIndex]).classList.remove("selected");
+            //document.getElementById(itemList[cursorIndex]).classList.remove("selected");
+            deselectItem(document.getElementById(itemList[cursorIndex]));
         }
         switch(direction) {
             case Direction.DOWN:
@@ -97,8 +175,9 @@
         }
 
         let item = document.getElementById(itemList[cursorIndex]);
-        item.classList.add("selected");
-        if(!isElementInViewport(item)) {
+        //item.classList.add("selected");
+        selectItem(item);
+        if(!qk_utils.isElementInViewport(item)) {
             item.scrollIntoView();
         }
     }
@@ -112,16 +191,22 @@
         expandText(postId);
     }
 
+    function edit() {
+        if(itemType != "comment" || typeof toggleEdit !== "function") {
+            return;
+        }
+        let commentId = itemList[cursorIndex].replace("comment-", "").replace("-only", "");
+        toggleEdit(commentId);
+    }
+
     function listItemIDs() {
-        const postSelector = '[id^="post-"]:not([id^="post-text-"])';
-        const commentSelector = '[id^="comment-"][id$="-only"]';
         let tmpList;
         switch(itemType) {
             case "comment":
-                tmpList = document.querySelectorAll(commentSelector);
+                tmpList = document.querySelectorAll(Constants.commentSelector);
                 break;
             case "post":
-                tmpList = document.querySelectorAll(postSelector);
+                tmpList = document.querySelectorAll(Constants.postSelector);
                 break;
             default:
                 tmpList = [];
@@ -132,27 +217,49 @@
 
     function keyEventDispatcher(event) {
         if(!itemList) {
-            console.log("lazy init item IDs");
+            console.log("qk: lazy init item IDs");
             listItemIDs();
         }
-        //console.log(event.target.type);
         if(event.target.type){
             // don't do keyboard navigation when we're typing a comment
+            return; // TODO
+            if(event.target.type.toLowerCase() == "textarea") {
+                if(event.ctrlKey && event.key == "Enter") {
+                    console.log("we'd submit the form here if it were implemented, but it's not implemented yet.");
+                }
+            }
             return;
         }
-        const key = String.fromCharCode(event.keyCode);
-        switch (key) {
+        if(event.ctrlKey) {
+            // currently there's no plans to use ctrl in a default binding, so we bail out to avoid silly behavior.
+            return;
+        }
+        switch (event.key) {
             case 'j':
-                cursor(Direction.DOWN);
+                t_cursor(Direction.DOWN);
                 break;
             case 'k':
-                cursor(Direction.UP);
+                t_cursor(Direction.UP);
                 break;
             case 'a':
                 vote(Direction.UP);
                 break;
             case 'z':
                 vote(Direction.DOWN);
+                break;
+            case 'r':
+                // kill the event so we don't type an 'r' into the textarea
+                if(event.preventDefault) {
+                    event.preventDefault();
+                }
+                reply();
+                break;
+            case 'e':
+                // edit doesn't autofocus the textarea like reply does but let's not take chances
+                if(event.preventDefault) {
+                    event.preventDefault();
+                }
+                edit();
                 break;
             case 'C':
                 navigate();
@@ -171,11 +278,52 @@
         }
     }
 
-    function initQuokkit() {
-        listItemIDs();
-        console.log("Quokkit loaded");
+    function selectClickedItem(element) {
+        return; //TODO
+        if(!itemList) {
+            listItemIDs();
+        }
+
+        let itemActual;
+        if(itemType == "post") {
+            //itemActual = qk_utils.findParentBySelector(element, Constants.postSelector);
+            itemActual = element.closest(Constants.postSelector);
+        } else if(itemType == "comment") {
+            //itemActual = qk_utils.findParentBySelector(element, Constants.commentSelector);
+            itemActual = element.closest(Constants.commentSelector);
+        }
+        if(!itemActual) {
+            return;
+        }
+        //console.log(itemActual);
+
+        let elementIndex = itemList.findIndex(item => item == itemActual.id);
+        if(elementIndex >= 0) {
+            deselectItem(itemList[cursorIndex]);
+            selectItem(itemList[elementIndex]);
+            cursorIndex = elementIndex;
+        }
     }
 
-    document.addEventListener("keypress", keyEventDispatcher);
+    function qk_clickHandler(event) {
+        return; //TODO
+        if(event.target.classList.contains('upvote-button') || event.target.classList.contains('downvote-button')) {
+            // ignore clicks on vote buttons, since we generate those in vote()
+            return;
+        }
+        selectClickedItem(event.target);
+    }
+
+    function initQuokkit() {
+        cursorIndex = -1;
+        t_cursor = qk_utils.throttle(cursor, 30); // smoother movement if the user holds the nav key down
+        qk_utils.registerStyles();
+        itemType = document.URL.search("\/post\/") >= 0 ? "comment" : "post"; // comment threads live under .../post/:postId
+        listItemIDs();
+        console.log("qk: Quokkit loaded");
+    }
+
+    document.addEventListener("click", qk_clickHandler);
+    document.addEventListener("keydown", keyEventDispatcher);
     initQuokkit();
 })();
