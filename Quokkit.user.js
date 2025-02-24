@@ -103,6 +103,9 @@
             return;
         }
         element.classList.add(Constants.selected);
+        if(!qk_utils.isElementInViewport(element)) {
+            element.scrollIntoView();
+        }
     }
 
     function deselectItem(element) {
