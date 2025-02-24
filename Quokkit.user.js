@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Quokkit
 // @namespace    http://tampermonkey.net/
-// @version      1.0.1
+// @version      1.0.2
 // @description  QOL features for The Motte
 // @author       John Doe Fletcher
 // @match        https://themotte.org/
@@ -81,12 +81,20 @@
             }
         },
         findParentBySelector(element, selector) {
-            // probably broken
-            let cur = element.parentNode;
-            while(cur && !cur.matches(selector)) {
-                cur = cur.parentNode;
+            return element.closest(selector);
+        },
+        listAncestors(element) {
+            let ancestors = [];
+            let cur = element;
+            while(cur.parentElement) {
+                ancestors.unshift(cur.parentElement.id);
+                cur = cur.parentElement;
             }
-            return cur;
+            return ancestors;
+        },
+        listAncestorComments(element) {
+            let ancestors = qk_utils.listAncestors(element);
+            return ancestors.filter(id => id.indexOf("comment-") == 0);
         }
     };
 
@@ -199,6 +207,30 @@
         toggleEdit(commentId);
     }
 
+    function parent() {
+        if(itemType != "comment") {
+            //console.log("parent() not called on comments");
+            return;
+        }
+        let el = document.getElementById(itemList[cursorIndex]);
+        let parent = document.getElementById(qk_utils.listAncestorComments(el).reverse()[1]+"-only");
+        if(parent) {
+            jumpSelectItem(parent);
+        }
+    }
+
+    function parentest() {
+        if(itemType != "comment") {
+            //console.log("parentest() not called on comments");
+            return;
+        }
+        let el = document.getElementById(itemList[cursorIndex]);
+        let parent = document.getElementById(qk_utils.listAncestorComments(el)[0]+"-only");
+        if(parent) {
+            jumpSelectItem(parent);
+        }
+    }
+
     function listItemIDs() {
         let tmpList;
         switch(itemType) {
@@ -273,13 +305,21 @@
             case 'F':
                 frontPage();
                 break;
+            case 'L':
+                listItemIDs();
+                break;
+            case 'p':
+                parent();
+                break;
+            case 'P':
+                parentest();
+                break;
             default:
                 break;
         }
     }
 
-    function selectClickedItem(element) {
-        return; //TODO
+    function jumpSelectItem(element) {
         if(!itemList) {
             listItemIDs();
         }
@@ -299,19 +339,26 @@
 
         let elementIndex = itemList.findIndex(item => item == itemActual.id);
         if(elementIndex >= 0) {
-            deselectItem(itemList[cursorIndex]);
-            selectItem(itemList[elementIndex]);
+            deselectItem(document.getElementById(itemList[cursorIndex]));
+            selectItem(document.getElementById(itemList[elementIndex]));
             cursorIndex = elementIndex;
         }
     }
 
     function qk_clickHandler(event) {
-        return; //TODO
         if(event.target.classList.contains('upvote-button') || event.target.classList.contains('downvote-button')) {
             // ignore clicks on vote buttons, since we generate those in vote()
             return;
         }
-        selectClickedItem(event.target);
+
+        if(event.target.tagName.toLowerCase() === "button") {
+            // hack: update the item list after AJAX gets more items
+            setTimeout(listItemIDs, 1000);
+            setTimeout(listItemIDs, 2000);
+            setTimeout(listItemIDs, 3000);
+            return;
+        }
+        jumpSelectItem(event.target);
     }
 
     function initQuokkit() {
