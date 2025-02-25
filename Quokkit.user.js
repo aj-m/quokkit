@@ -354,7 +354,12 @@
             return;
         }
 
-        if(event.target.tagName.toLowerCase() === "button") {
+        let tTag = event.target.tagName.toLowerCase();
+        let tId = event.target.id.toLowerCase();
+        if(tTag === "button"
+           || tId.indexOf("edit-btn-") == 0
+           || tId.indexOf("save-reply-to-comment_") == 0
+        ) {
             // hack: update the item list after AJAX gets more items
             setTimeout(listItemIDs, 1000);
             setTimeout(listItemIDs, 2000);
