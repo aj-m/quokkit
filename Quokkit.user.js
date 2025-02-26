@@ -23,8 +23,11 @@
 
     const Constants = {
         selected: "qk_selected",
+        fetched: "qk_fetched",
         postSelector: '[id^="post-"]:not([id^="post-text-"])',
         commentSelector: '[id^="comment-"][id$="-only"]',
+        commentLikeSelector: '[id^="comment-"][id$="-only"],[class*="more-comments"]:not([class*="qk_fetched"]),[id^="viewmore-"]:not([class*="qk_fetched"])',
+        commentFetchSelector: '[class*="more-comments"],[id^="viewmore-"]',
         css: {
             upvoted: ".active.arrow-up::before",
             downvoted: ".active.arrow-down::before"
@@ -37,6 +40,9 @@
     };
 
     const qk_utils = {
+        sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        },
         throttle (callback, limit) {
             // https://stackoverflow.com/a/27078401
             var waiting = false;
@@ -95,6 +101,18 @@
         listAncestorComments(element) {
             let ancestors = qk_utils.listAncestors(element);
             return ancestors.filter(id => id.indexOf("comment-") == 0);
+        },
+        updateAfterAjax(seconds, cb) {
+            // debating putting a clamp on the number of seconds
+            const updateAndCallback = () => {
+                listItemIDs();
+                if(cb && typeof cb === "function") {
+                    cb();
+                }
+            }
+            for(let n = 0; n <= seconds; n++) {
+                setTimeout(updateAndCallback, n * 1000);
+            }
         }
     };
 
@@ -102,6 +120,7 @@
         if(!element) {
             return;
         }
+        //console.log(element);
         element.classList.add(Constants.selected);
         if(!qk_utils.isElementInViewport(element)) {
             element.scrollIntoView();
@@ -234,11 +253,34 @@
         }
     }
 
+    function commentishAction() {
+        if(itemType != "comment") {
+            return;
+        }
+        let el = document.getElementById(itemList[cursorIndex]);
+        if(el.id.indexOf("morecomments-") == 0) {
+            // More Comments commentlike selected
+            el.classList.add(Constants.fetched);
+            cursor(Direction.UP); // work around AJAX shenanigans so we have something sane selected.
+            el.querySelector('button').click();
+
+            //qk_utils.updateAfterAjax(3); // possibly unnecessary??
+        } else if(el.id.indexOf("viewmore-") == 0) {
+            // Bottom of thread ViewButton selected
+            el.classList.add(Constants.fetched);
+            cursor(Direction.UP);
+            el.querySelector('button').click();
+        } else {
+            // not implemented yet, but toggle collapse on the comment
+        }
+    }
+
     function listItemIDs() {
         let tmpList;
         switch(itemType) {
             case "comment":
-                tmpList = document.querySelectorAll(Constants.commentSelector);
+                //tmpList = document.querySelectorAll(Constants.commentSelector);
+                tmpList = document.querySelectorAll(Constants.commentLikeSelector);
                 break;
             case "post":
                 tmpList = document.querySelectorAll(Constants.postSelector);
@@ -270,6 +312,9 @@
             return;
         }
         switch (event.key) {
+            case 'Enter':
+                commentishAction();
+                break;
             case 'j':
                 t_cursor(Direction.DOWN);
                 break;
@@ -361,9 +406,7 @@
            || tId.indexOf("save-reply-to-comment_") == 0
         ) {
             // hack: update the item list after AJAX gets more items
-            setTimeout(listItemIDs, 1000);
-            setTimeout(listItemIDs, 2000);
-            setTimeout(listItemIDs, 3000);
+            qk_utils.updateAfterAjax(3);
             return;
         }
         jumpSelectItem(event.target);
@@ -376,6 +419,7 @@
         itemType = document.URL.search("\/post\/") >= 0 ? "comment" : "post"; // comment threads live under .../post/:postId
         listItemIDs();
         console.log("qk: Quokkit loaded");
+        //console.debug(itemList);
     }
 
     document.addEventListener("click", qk_clickHandler);
